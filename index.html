@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Prediction Worker · Book I</title>
+  <meta name="description" content="Eighteen PredictionWorker agents. One paper book. Prediction markets only." />
+  <style>
+    :root { --bg:#07080a; --ink:#f3f4f6; --muted:#8b939c; --line:#1c2229; --card:#0c0e12; --watson:#006699; --intel:#00FFCC; --alpha:#9932CC; --exec:#FF8C00; --ctrl:#FF3333; --yes:#1d4ed8; --no:#dc2626; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); font-family:IBM Plex Sans,ui-sans-serif,system-ui,sans-serif; background:radial-gradient(900px 420px at 12% -8%,#002D6266,transparent),var(--bg); }
+    header { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; padding:22px 28px 16px; border-bottom:1px solid var(--line); }
+    h1 { font-family:Georgia,serif; font-weight:400; font-size:30px; margin:0; }
+    .pulse { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--watson); box-shadow:0 0 12px var(--watson); margin-right:8px; }
+    .sub { color:var(--muted); font-size:13px; margin:6px 0 0; }
+    button { border:1px solid var(--line); background:#11151b; color:var(--ink); padding:8px 12px; font:12px/1 inherit; letter-spacing:.04em; text-transform:uppercase; cursor:pointer; }
+    button.primary { background:var(--watson); border-color:var(--watson); }
+    main { padding:22px 28px 56px; max-width:1180px; }
+    .stats { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:22px; }
+    .stat { border:1px solid var(--line); background:var(--card); padding:12px 14px; }
+    .stat span { display:block; color:var(--muted); font-size:11px; letter-spacing:.05em; text-transform:uppercase; }
+    .stat b { display:block; font-size:20px; margin-top:4px; font-variant-numeric:tabular-nums; }
+    .stat.halt b { color:var(--ctrl); }
+    .layout { display:grid; grid-template-columns:1.4fr .9fr; gap:22px; }
+    .grid { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; }
+    .node { min-height:86px; padding:8px; font-size:10px; border:1px solid #222; display:flex; flex-direction:column; justify-content:space-between; }
+    .INTEL { background:#004D40; color:var(--intel); }
+    .ALPHA { background:#310062; color:var(--alpha); }
+    .EXEC { background:#4A2700; color:var(--exec); }
+    .CONTROL { background:#5C0000; color:var(--ctrl); }
+    .side { border:1px solid var(--line); background:var(--card); padding:14px; }
+    .yes { background:var(--yes); color:#fff; border:0; flex:1; }
+    .no { background:var(--no); color:#fff; border:0; flex:1; }
+    .row { display:flex; gap:8px; }
+    .tape { max-height:220px; overflow:auto; font-size:12px; color:var(--muted); }
+    .note { margin-top:24px; color:var(--muted); font-size:13px; line-height:1.55; max-width:72ch; }
+    @media (max-width:900px){ header,.layout{display:block;} .stats,.grid{grid-template-columns:repeat(2,1fr);} }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1><span class="pulse" id="pulse"></span>Prediction Worker</h1>
+      <p class="sub">Book I · 18 agents · paper desk · $10,000 → $1,000,000 mandate · no live orders</p>
+    </div>
+    <div class="actions">
+      <button id="connect">Connect books</button>
+      <button id="cycle">Cycle</button>
+      <button id="engage" class="primary">Engage</button>
+      <button id="halt">Halt</button>
+    </div>
+  </header>
+  <main>
+    <div class="stats">
+      <div class="stat"><span>NAV</span><b id="nav">$10,000.00</b></div>
+      <div class="stat"><span>Peak</span><b id="peak">$10,000.00</b></div>
+      <div class="stat"><span>Drawdown</span><b id="dd">0.00%</b></div>
+      <div class="stat"><span>Cycle</span><b id="cyc">0</b></div>
+      <div class="stat" id="stateBox"><span>State</span><b id="state">IDLE</b></div>
+    </div>
+    <div class="layout">
+      <section><div class="grid" id="grid"></div></section>
+      <aside class="side">
+        <h2 style="margin:0 0 10px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Live books · paper fill</h2>
+        <div id="mkts">Loading public Gamma markets…</div>
+        <div class="tape" id="tape"></div>
+      </aside>
+    </div>
+    <p class="note">Prediction Worker is the public desk. HermesWorker remains the internal command node. Cycle / Engage run a paper loop with half-Kelly, 4% niche cap, 7% throttle, and a 12% / $2,000 kill-switch. Connecting reads public Polymarket Gamma markets. Nothing here signs a CLOB order or asks for a wallet.</p>
+  </main>
+  <script>
+    const NODES = [
+      ...[1,2,3,4,5].map(i => ["INTEL", `IntelScout_0${i}`]),
+      ...[1,2,3,4,5].map(i => ["ALPHA", `AlphaQuant_0${i}`]),
+      ...[1,2,3,4,5].map(i => ["EXEC", `ExecRouter_0${i}`]),
+      ...[1,2,3].map(i => ["CONTROL", `ControlSentinel_0${i}`]),
+    ];
+    const book = { nav: 10000, peak: 10000, cycle: 0, halted: false, running: false, tape: [] };
+    const grid = document.getElementById("grid");
+    const nodeEls = {};
+    NODES.forEach(([c, n]) => {
+      const el = document.createElement("div");
+      el.className = "node " + c;
+      el.innerHTML = `<small>${c}</small><div>${n}</div>`;
+      grid.appendChild(el);
+      nodeEls[n] = el;
+    });
+    const money = n => "$" + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    function paint() {
+      const dd = book.peak > 0 ? ((book.peak - book.nav) / book.peak) * 100 : 0;
+      document.getElementById("nav").textContent = money(book.nav);
+      document.getElementById("peak").textContent = money(book.peak);
+      document.getElementById("dd").textContent = dd.toFixed(2) + "%";
+      document.getElementById("cyc").textContent = book.cycle;
+      document.getElementById("state").textContent = book.halted ? "HALTED" : (book.running ? "ENGAGED" : "IDLE");
+      document.getElementById("stateBox").classList.toggle("halt", book.halted);
+    }
+    function log(msg) {
+      book.tape.unshift(msg);
+      book.tape = book.tape.slice(0, 40);
+      document.getElementById("tape").innerHTML = book.tape.map(t => `<div>${t}</div>`).join("");
+    }
+    function sizeKelly(price, p) {
+      const dd = book.peak > 0 ? ((book.peak - book.nav) / book.peak) * 100 : 0;
+      if (dd >= 12 || book.nav < 2000) { book.halted = true; return { usd: 0, reason: "HARD KILL-SWITCH", halted: true, dd }; }
+      const frac = dd >= 7 ? 0.25 : 0.50;
+      const b = (1 / price) - 1;
+      const raw = b > 0 ? (b * p - (1 - p)) / b : 0;
+      if (raw <= 0) return { usd: 0, reason: "No edge", halted: false, dd };
+      const pct = Math.min(raw * frac, 0.04);
+      return { usd: book.nav * pct, reason: dd >= 7 ? "0.25x Kelly" : "0.50x Kelly", halted: false, dd };
+    }
+    function cycle() {
+      if (book.halted) { log("HALTED — flatten to cash"); paint(); return; }
+      book.cycle += 1;
+      const price = Math.min(0.92, Math.max(0.12, 0.52 + Math.random() * 0.03 - 0.012));
+      const p = 0.58 + (Math.random() * 0.08 - 0.03);
+      const s = sizeKelly(price, p);
+      if (s.halted) { log(`KILL-SWITCH · DD ${s.dd.toFixed(2)}%`); paint(); return; }
+      book.nav = Math.max(0, book.nav + s.usd * ((p - price) * 0.35 + (Math.random() - 0.48) * 0.04));
+      if (book.nav > book.peak) book.peak = book.nav;
+      log(`C${book.cycle} · bid ${price.toFixed(2)} · ${s.reason} · ${money(s.usd)} · NAV ${money(book.nav)}`);
+      paint();
+    }
+    let timer = null;
+    document.getElementById("cycle").onclick = cycle;
+    document.getElementById("engage").onclick = () => { if (book.running) return; book.running = true; paint(); timer = setInterval(cycle, 1000); };
+    document.getElementById("halt").onclick = () => { book.running = false; clearInterval(timer); paint(); log("Manual halt"); };
+    async function connect() {
+      const box = document.getElementById("mkts");
+      try {
+        const r = await fetch("https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=4");
+        const rows = await r.json();
+        box.innerHTML = "";
+        (rows || []).slice(0, 4).forEach(m => {
+          const q = Number(m.outcomePrices ? JSON.parse(m.outcomePrices)[0] : 0.5);
+          const art = document.createElement("article");
+          art.innerHTML = `<h3>${(m.question || "Market").slice(0,90)}</h3><div class="row"><button class="yes">Yes ${(q*100).toFixed(0)}¢</button><button class="no">No ${((1-q)*100).toFixed(0)}¢</button></div>`;
+          art.querySelector(".yes").onclick = () => paperFill(m.question, "YES", q);
+          art.querySelector(".no").onclick = () => paperFill(m.question, "NO", 1-q);
+          box.appendChild(art);
+        });
+        log("Connected public Gamma books");
+      } catch (e) {
+        box.innerHTML = `<article><h3>Paper book online</h3><div class="row"><button class="yes">Yes 52¢</button><button class="no">No 48¢</button></div></article>`;
+        box.querySelector(".yes").onclick = () => paperFill("Paper", "YES", 0.52);
+        box.querySelector(".no").onclick = () => paperFill("Paper", "NO", 0.48);
+        log("Gamma blocked — local paper books");
+      }
+    }
+    function paperFill(title, side, px) {
+      if (book.halted) return log("Blocked — halted");
+      const s = sizeKelly(px, 0.58);
+      if (!s.usd) return log(s.reason);
+      book.nav -= s.usd * 0.004;
+      log(`PAPER ${side} · ${String(title).slice(0,48)} @ ${px.toFixed(2)} · ${money(s.usd)}`);
+      paint();
+    }
+    document.getElementById("connect").onclick = connect;
+    paint(); connect();
+  </script>
+</body>
+</html>
